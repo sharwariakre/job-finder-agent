@@ -4,7 +4,7 @@ Job Monitor Agent
 This is a ReAct-style AI agent that:
 1. Uses Claude + web_search to find agentic AI job postings
 2. Filters/ranks them with an LLM pass
-3. Emails you a daily digest
+3. Prints a digest to the terminal
 
 HOW THE AGENT LOOP WORKS (this is what happened when Claude Code applied to Medfinder):
 
@@ -22,48 +22,37 @@ That's the entire agent loop. Everything else is scaffolding around it.
 import anthropic
 import json
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # Job search configuration
 JOB_SEARCHES = [
-    "agentic AI engineer jobs 2025",
-    "AI agent software engineer jobs",
-    "LLM applications engineer job posting",
-    "autonomous AI systems engineer careers",
+    "agentic AI engineer new grad entry level jobs 2026",
+    "AI voice agent engineer junior early career jobs 2026",
+    "full stack engineer React Node.js Python new grad jobs 2026",
+    "backend engineer FastAPI Python entry level jobs 2026",
 ]
 
 # ============================================================
 # STEP 1: THE ANTHROPIC CLIENT
 # ============================================================
-# The client connects to the Anthropic API.
-# Your API key is read from the ANTHROPIC_API_KEY environment variable.
-# Set it: export ANTHROPIC_API_KEY="sk-ant-..."
 client = anthropic.Anthropic()
 
 
 # ============================================================
 # STEP 2: TOOL DEFINITIONS
 # ============================================================
-# We define tools as JSON schemas. Claude reads these schemas and
-# decides WHEN and HOW to call each tool. We never hardcode "call
-# web_search now" — Claude decides based on reasoning.
-
-# The web_search tool is built into the Anthropic API.
-# We just declare we want it available.
 WEB_SEARCH_TOOL = {
     "type": "web_search_20250305",
     "name": "web_search",
 }
 
-# We also define a custom "done" tool. This is the signal Claude uses
-# to exit the loop cleanly with structured output (the job listings).
-# Without this, Claude might keep searching indefinitely.
 DONE_TOOL = {
     "name": "return_job_listings",
     "description": (
         "Call this when you have finished searching and have a complete list "
-        "of relevant agentic AI / AI engineer job postings. Pass the structured "
-        "list of jobs as the argument."
+        "of relevant job postings. Pass the structured list of jobs as the argument."
     ),
     "input_schema": {
         "type": "object",
@@ -73,22 +62,15 @@ DONE_TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "title":       {"type": "string"},
-                        "company":     {"type": "string"},
-                        "location":    {"type": "string"},
-                        "url":         {"type": "string"},
-                        "why_relevant":{"type": "string"},  # LLM explains why this fits
-                        "seniority":   {"type": "string", "enum": ["entry", "mid", "senior", "staff", "unknown"]},
+                        "title":   {"type": "string"},
+                        "company": {"type": "string"},
+                        "url":     {"type": "string"},
                     },
-                    "required": ["title", "company", "url", "why_relevant"],
+                    "required": ["title", "company", "url"],
                 },
             },
-            "search_summary": {
-                "type": "string",
-                "description": "Brief summary of what you searched for and how many results you found.",
-            },
         },
-        "required": ["jobs", "search_summary"],
+        "required": ["jobs"],
     },
 }
 
@@ -96,22 +78,20 @@ DONE_TOOL = {
 # ============================================================
 # STEP 3: THE SYSTEM PROMPT
 # ============================================================
-# The system prompt is Claude's "personality" and instructions for this task.
-# It shapes how Claude reasons inside the ReAct loop.
-
-SYSTEM_PROMPT = """You are a job search agent specialized in finding agentic AI and LLM engineering roles.
+SYSTEM_PROMPT = """You are a job search agent finding early-career engineering roles.
 
 Your task:
-1. Search the web for recent job postings for agentic AI engineers, LLM application engineers, AI systems engineers, 
-   and similar roles that involve building autonomous AI agents, LLM pipelines, or AI-powered applications.
-2. Filter results: only keep roles that involve actually BUILDING AI agents/systems (not just using ChatGPT at work).
-3. Look for signals like: ReAct loops, tool use, LLM orchestration, agent frameworks (LangChain, LlamaIndex, 
-   AutoGen, CrewAI), RAG systems, voice AI, multimodal AI, or autonomous systems.
-4. Exclude: data science roles focused on training models, pure ML research, non-technical AI roles.
-5. Run 3-4 searches with different query terms to maximize coverage.
-6. Once you have a solid list (aim for 10-20 relevant jobs), call return_job_listings with your findings.
+1. Search for job postings across: company career pages, Wellfound, YC Work at a Startup,
+   greenhouse.io, lever.co, and LinkedIn posts where hiring managers posted directly
+   (look for "we're hiring", "join our team", "DM me", "apply below").
+2. Avoid: Indeed, ZipRecruiter, Glassdoor, Monster, Simply Hired.
+3. Target roles in: agentic AI, AI voice agents, full stack (React/Node.js), backend (Python/FastAPI/Node.js).
+4. Only include roles requiring 0-3 years of experience. Exclude anything asking for 4+ years,
+   pure ML research, data science, non-technical AI roles, hardware engineering,
+   embedded systems, firmware, FPGA, electrical engineering, or any physical/chip design roles.
+5. Run exactly 1 search, no more.
+6. Return only job title, company, and URL — no summaries or explanations.
 
-For each job, explain WHY it's relevant to agentic AI work specifically.
 Today's date: """ + datetime.now().strftime("%B %d, %Y")
 
 
@@ -120,111 +100,64 @@ Today's date: """ + datetime.now().strftime("%B %d, %Y")
 # ============================================================
 
 def run_job_search_agent() -> dict:
-    """
-    Run the ReAct agent loop.
-    
-    Returns the structured job listings from Claude's return_job_listings call.
-    
-    The loop:
-      messages = [initial user request]
-      while True:
-          response = claude(messages, tools=[web_search, return_job_listings])
-          
-          if stop_reason == "end_turn":
-              break  # Claude finished without calling return_job_listings
-          
-          for block in response.content:
-              if block.type == "tool_use":
-                  if block.name == "return_job_listings":
-                      return block.input   # We're done! Claude gave us structured output.
-                  elif block.name == "web_search":
-                      # The API handles web_search execution automatically.
-                      # We don't need to execute it ourselves — the results
-                      # come back in the next response as tool_result blocks.
-                      pass
-          
-          # Append assistant response to message history so Claude remembers what it did
-          messages.append({"role": "assistant", "content": response.content})
-          # Continue loop — Claude will react to search results
-    """
-    
+    """Run the ReAct agent loop and return structured job listings."""
+
     print("🤖 Starting job search agent...")
-    
-    # The conversation starts with a single user message.
-    # Everything Claude does from here is autonomous.
+
     messages = [
         {
             "role": "user",
             "content": (
-                "Please search for agentic AI and LLM engineer job postings. "
-                "Search multiple queries, filter for genuine agent/LLM roles, "
-                "then call return_job_listings with your findings."
+                "Search for early-career agentic AI, voice AI, full stack, and backend "
+                "engineering job postings. Run exactly 1 search, then call "
+                "return_job_listings with title, company, and URL only."
             ),
         }
     ]
-    
+
     tools = [WEB_SEARCH_TOOL, DONE_TOOL]
     iteration = 0
-    max_iterations = 10  # Safety limit — agents can get stuck in loops
-    
+    max_iterations = 10
+
     while iteration < max_iterations:
         iteration += 1
         print(f"\n🔄 Agent iteration {iteration}...")
-        
-        # THE CORE API CALL
-        # This is where Claude thinks, decides which tool to call, and returns.
-        # Note: betas=["interleaved-thinking-2025-05-14"] enables extended thinking
-        # which lets Claude reason more carefully before acting.
+
         response = client.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=8000,
+            max_tokens=2000,
             system=SYSTEM_PROMPT,
             tools=tools,
             messages=messages,
         )
-        
+
         print(f"   Stop reason: {response.stop_reason}")
-        
-        # INSPECT THE RESPONSE
-        # response.content is a list of blocks. Each block is one of:
-        #   - TextBlock: Claude's reasoning/commentary (we log this)
-        #   - ToolUseBlock: Claude wants to call a tool
-        #   - ToolResultBlock: results from a tool (for web_search, API handles this)
-        
+
         for block in response.content:
             if hasattr(block, "type"):
                 if block.type == "text":
-                    # Claude is thinking out loud (ReAct = Reasoning step)
                     if block.text.strip():
                         print(f"   💭 Claude: {block.text[:200]}...")
-                
+
                 elif block.type == "tool_use":
                     print(f"   🔧 Tool call: {block.name}")
-                    
-                    # CHECK FOR OUR DONE SIGNAL
+
                     if block.name == "return_job_listings":
                         print(f"   ✅ Agent finished! Found {len(block.input.get('jobs', []))} jobs.")
-                        return block.input  # Return the structured data
-                    
+                        return block.input
+
                     elif block.name == "web_search":
                         print(f"   🔍 Searching: {block.input.get('query', '')}")
-                        # The web_search tool is handled automatically by the Anthropic API.
-                        # We don't execute it — the next response will contain the results.
-        
-        # If Claude didn't call return_job_listings yet, continue the loop.
-        # Append the response so Claude has memory of what it did.
+
         messages.append({"role": "assistant", "content": response.content})
-        
-        # If Claude is done without calling our tool, break
+
         if response.stop_reason == "end_turn":
             print("   ⚠️  Agent ended without calling return_job_listings")
             break
-    
-    # Fallback if agent loop exhausted
-    return {"jobs": [], "search_summary": "Agent loop exhausted without results."}
+
+    return {"jobs": []}
 
 
-# ============================================================
 # ============================================================
 # STEP 5: PRINT THE DIGEST
 # ============================================================
@@ -232,32 +165,16 @@ def run_job_search_agent() -> dict:
 def print_digest(job_data: dict):
     """Print the job digest to the terminal."""
     jobs = job_data.get("jobs", [])
-    summary = job_data.get("search_summary", "")
     date_str = datetime.now().strftime("%b %d, %Y")
 
     print("\n" + "=" * 60)
-    print(f"  🤖 AGENTIC AI JOBS — {date_str}")
+    print(f"  🤖 JOB DIGEST — {date_str}")
     print("=" * 60)
-    print(f"  {summary}")
-    print(f"  {len(jobs)} relevant roles found\n")
+    print(f"  {len(jobs)} roles found\n")
 
-    # Group by seniority for cleaner output
-    groups = {
-        "senior/staff": [j for j in jobs if j.get("seniority") in ("senior", "staff")],
-        "mid":          [j for j in jobs if j.get("seniority") == "mid"],
-        "other":        [j for j in jobs if j.get("seniority") not in ("senior", "staff", "mid")],
-    }
-
-    for label, group in groups.items():
-        if not group:
-            continue
-        print(f"── {label.upper()} {'─' * (50 - len(label))}")
-        for job in group:
-            print(f"\n  {job.get('title', '?')}")
-            print(f"  {job.get('company', '?')}  ·  {job.get('location', 'Remote/Unknown')}")
-            print(f"  {job.get('url', '')}")
-            print(f"  ↳ {job.get('why_relevant', '')}")
-        print()
+    for job in jobs:
+        print(f"  {job.get('title', '?')} @ {job.get('company', '?')}")
+        print(f"  {job.get('url', '')}\n")
 
 
 def run():
