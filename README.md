@@ -12,7 +12,7 @@ pip install anthropic schedule
 ### 2. Set environment variables
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-
+```
 
 ### 3. Run it
 
