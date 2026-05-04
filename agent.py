@@ -86,9 +86,9 @@ Your task:
    (look for "we're hiring", "join our team", "DM me", "apply below").
 2. Avoid: Indeed, ZipRecruiter, Glassdoor, Monster, Simply Hired.
 3. Target roles in: agentic AI, AI voice agents, full stack (React/Node.js), backend (Python/FastAPI/Node.js).
-4. Only include roles requiring 0-3 years of experience. Exclude anything asking for 4+ years,
+4. Only include roles requiring 0-2 years of experience. Exclude anything asking for 4+ years,
    pure ML research, data science, non-technical AI roles, hardware engineering,
-   embedded systems, firmware, FPGA, electrical engineering, or any physical/chip design roles.
+   embedded systems, firmware, FPGA, electrical engineering, or any physical/chip design roles. Exclude jobs that explicitly mention citizenship requirements or security clearance.
 5. Run exactly 1 search, no more.
 6. Return only job title, company, and URL — no summaries or explanations.
 
@@ -125,7 +125,7 @@ def run_job_search_agent() -> dict:
 
         response = client.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=2000,
+            max_tokens=1500,
             system=SYSTEM_PROMPT,
             tools=tools,
             messages=messages,
